@@ -4,7 +4,9 @@
             fs.core)
   (:import java.text.SimpleDateFormat
            java.util.Calendar
-           java.util.TimeZone)
+           java.util.TimeZone
+           java.lang.Math
+           java.lang.Double)
   (:gen-class))
 
 (defrecord vec3 [x y z])
@@ -25,6 +27,28 @@
         qLeft  (rgpoly-quad (->vec3 x y z)  (->vec3 x y z_)  (->vec3 x y_ z)  (->vec3 x y_ z_) mat)
         qRight (rgpoly-quad (->vec3 x_ y z) (->vec3 x_ y_ z) (->vec3 x_ y z_) (->vec3 x_ y_ z_) mat)]
     (concat qTop qBot qFront qBack qLeft qRight)))
+
+(defn minmax [rgval]
+  (reduce (fn [{:keys [min max]} val] {:min (Math/min min val) :max (Math/max max val)})
+          {:min java.lang.Double/POSITIVE_INFINITY :max java.lang.Double/NEGATIVE_INFINITY}
+          rgval))
+
+(defn delta-from-minmax [{:keys [min max]}]
+  (- (/ (- min max) 2) min))
+
+(defn rgpoly-center [rgpoly]
+  (let [rgvec3 (apply concat (for [poly rgpoly] (:rgvec3 poly)))
+        {dx :x dy :y dz :z}
+        (reduce (fn [deltas key]
+                  (let [rgval (map #(double (get % key)) rgvec3)]
+                    (assoc deltas key (-> rgval minmax delta-from-minmax))))
+                {}
+                [:x :y :z])]
+    (for [poly rgpoly]
+      (let [rgvec3New
+            (for [{:keys [x y z]} (:rgvec3 poly)]
+              (->vec3 (+ dx x) (+ dy y) (+ dz z)))]
+        (->poly rgvec3New (:mat poly))))))
 
 (defn dedup [rgval]
   (loop [i 0
@@ -120,6 +144,7 @@
     (-> (slurp filenameIn)
         rgcube-from-cko
         rgpoly-from-rgcube
+        rgpoly-center
         (write-dae name filenameOut))))
 
 (defn write-dae [rgpoly name filename]
@@ -135,15 +160,8 @@
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (let [xml (->
-       ;(slurp "C:/dev/unity/w.cko")
-       ;rgcube-from-cko
-       ;rgpoly-from-rgcube
-       (rgpoly-cube (->vec3 0 0 0) nil)
-       (dae-from-rgpoly "cube")
-       xml/sexp-as-element
-       xml/emit-str)]
-  (spit "C:/dev/unity/cube.dae" xml)))
+  (doseq [filename args]
+    (convert-cko-to-dae filename)))
 
 ;(convert-cko-to-dae "C:/dev/unity/genie-hand.cko")
 ;(write-test-cube)
