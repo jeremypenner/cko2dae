@@ -62,6 +62,10 @@
           (recur i (next rgval) mpval_i rgval_result)))
       [mpval_i rgval_result])))
 
+
+(defn dae-merge-libs [& rglibs]
+  (apply merge-with #(concat %1 %2) rglibs))
+
 (defn dae-vec3-array [rgvec3 id x y z]
   (let [rgfloat (apply concat (map (fn [{:keys [x y z]}] [x y z]) rgvec3))]
     [:source {:id id}
@@ -73,20 +77,56 @@
              [:param {:name y :type "float"}]
              [:param {:name z :type "float"}]]]]))
 
+(defn id-from-mat [mat]
+  (str "mat_" (:colour mat)))
+
+(defn dae-colour-from-mat [mat]
+  (let [colour (:colour mat)
+        rgbaHex [(subs colour 2 4) (subs colour 4 6) (subs colour 6 8) (subs colour 0 2)]
+        rgba (for [hex rgbaHex]
+               (-> (Integer/parseInt hex 16)
+                   (/ 255.0)))]
+    [:color {} (clojure.string/join " " rgba)]))
+
+(defn dae-mat-from-mat [mat]
+  (if mat
+    (let [idMat (id-from-mat mat)
+          idFx (str idMat "_fx")]
+      {:materials
+       [[:material {:id idMat :name idFx}
+         [:instance_effect {:url (str "#" idFx)}]]]
+       :effects
+       [[:effect {:id idFx :name idFx}
+         [:profile_COMMON {}
+          [:technique {:sid "common"}
+           [:phong {}
+            [:diffuse {} (dae-colour-from-mat mat)]
+            [:ambient {} (dae-colour-from-mat mat)]
+            [:specular {} (dae-colour-from-mat mat)]]]]]]})))
+
+(defn rgmat-from-rgpoly [rgpoly]
+  (set (for [{mat :mat} rgpoly :when (not (nil? mat))] mat)))
+
+(defn dae-mat-from-rgpoly [rgpoly]
+  (reduce dae-merge-libs
+          {}
+          (for [mat (rgmat-from-rgpoly rgpoly)] (dae-mat-from-mat mat))))
+
 (defn dae-geom-from-rgpoly [rgpoly id name]
   (let [rgtri (apply concat (map :rgvec3 rgpoly))
         [mpvec3_i rgvec3] (dedup rgtri)
         points_id (str id "_points")
         vertices_id (str id "_vertices")]
-    [:geometry {:id id :name name}
+    {:geometries
+     [[:geometry {:id id :name name}
        [:mesh {}
           (dae-vec3-array rgvec3 points_id "X" "Y" "Z")
           ;todo: normals, textures
           [:vertices {:id vertices_id}
              [:input {:semantic "POSITION" :source (str "#" points_id)}]]
-          [:triangles {:count (count rgpoly)}
+          [:triangles {:count (count rgpoly) :material (id-from-mat (:mat (first rgpoly)))}
              [:input {:semantic "VERTEX" :source (str "#" vertices_id) :offset 0}]
-             [:p {} (clojure.string/join " " (map #(get mpvec3_i %) rgtri))]]]]))
+             [:p {} (clojure.string/join " " (map #(get mpvec3_i %) rgtri))]]]]]}))
 
 (defn now
   "Returns current ISO 8601 compliant date."
@@ -107,11 +147,19 @@
       (conj [:scene {} scene])))
 
 (defn dae-from-rgpoly [rgpoly name]
-  (dae-from-desc {:geometries    [(dae-geom-from-rgpoly rgpoly (str "id_" name) name)]
-                  :visual_scenes [[:visual_scene {:id (str "id_" name "_scene") :name (str name "_scene")}
-                                     [:node {:id (str name "_node") :name name :type "NODE"}
-                                        [:instance_geometry {:url (str "#id_" name)}]]]]}
-                 [:instance_visual_scene {:url (str "#id_" name "_scene")}]))
+  (dae-from-desc
+   (dae-merge-libs
+    (dae-geom-from-rgpoly rgpoly (str "id_" name) name)
+    (dae-mat-from-rgpoly rgpoly)
+    {:visual_scenes [[:visual_scene {:id (str "id_" name "_scene") :name (str name "_scene")}
+                       [:node {:id (str name "_node") :name name :type "NODE"}
+                         [:instance_geometry {:url (str "#id_" name)}
+                          [:bind_material {}
+                           [:technique_common {}
+                            (for [mat (rgmat-from-rgpoly rgpoly)]
+                              [:instance_material {:material (id-from-mat mat)
+                                                   :target (str "#" (id-from-mat mat))}])]]]]]]})
+   [:instance_visual_scene {:url (str "#id_" name "_scene")}]))
 
 (defn parse-number
   "Reads a number from a string. Returns nil if not a number."
@@ -163,5 +211,5 @@
   (doseq [filename args]
     (convert-cko-to-dae filename)))
 
-;(convert-cko-to-dae "C:/dev/unity/genie-hand.cko")
+(convert-cko-to-dae "C:/dev/unity/8.cko")
 ;(write-test-cube)
