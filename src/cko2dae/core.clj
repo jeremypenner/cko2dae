@@ -93,16 +93,14 @@
     (let [idMat (id-from-mat mat)
           idFx (str idMat "_fx")]
       {:materials
-       [[:material {:id idMat :name idFx}
+       [[:material {:id idMat }
          [:instance_effect {:url (str "#" idFx)}]]]
        :effects
-       [[:effect {:id idFx :name idFx}
+       [[:effect {:id idFx}
          [:profile_COMMON {}
           [:technique {:sid "common"}
            [:phong {}
-            [:diffuse {} (dae-colour-from-mat mat)]
-            [:ambient {} (dae-colour-from-mat mat)]
-            [:specular {} (dae-colour-from-mat mat)]]]]]]})))
+            [:diffuse {} (dae-colour-from-mat mat)]]]]]]})))
 
 (defn rgmat-from-rgpoly [rgpoly]
   (set (for [{mat :mat} rgpoly :when (not (nil? mat))] mat)))
@@ -115,18 +113,21 @@
 (defn dae-geom-from-rgpoly [rgpoly id name]
   (let [rgtri (apply concat (map :rgvec3 rgpoly))
         [mpvec3_i rgvec3] (dedup rgtri)
+        mpmat_rgtri (reduce (fn [mp poly] (merge-with concat mp {(:mat poly) (:rgvec3 poly)})) {} rgpoly)
         points_id (str id "_points")
         vertices_id (str id "_vertices")]
     {:geometries
      [[:geometry {:id id :name name}
-       [:mesh {}
-          (dae-vec3-array rgvec3 points_id "X" "Y" "Z")
-          ;todo: normals, textures
-          [:vertices {:id vertices_id}
-             [:input {:semantic "POSITION" :source (str "#" points_id)}]]
-          [:triangles {:count (count rgpoly) :material (id-from-mat (:mat (first rgpoly)))}
+       (into [] (concat
+         [:mesh {}
+            (dae-vec3-array rgvec3 points_id "X" "Y" "Z")
+            ;todo: textures
+            [:vertices {:id vertices_id}
+               [:input {:semantic "POSITION" :source (str "#" points_id)}]]]
+         (for [[mat rgtri] mpmat_rgtri]
+           [:triangles {:count (/ (count rgtri) 3) :material (id-from-mat mat)}
              [:input {:semantic "VERTEX" :source (str "#" vertices_id) :offset 0}]
-             [:p {} (clojure.string/join " " (map #(get mpvec3_i %) rgtri))]]]]]}))
+             [:p {} (clojure.string/join " " (map #(get mpvec3_i %) rgtri))]])))]]}))
 
 (defn now
   "Returns current ISO 8601 compliant date."
@@ -157,7 +158,7 @@
                           [:bind_material {}
                            [:technique_common {}
                             (for [mat (rgmat-from-rgpoly rgpoly)]
-                              [:instance_material {:material (id-from-mat mat)
+                              [:instance_material {:symbol (id-from-mat mat)
                                                    :target (str "#" (id-from-mat mat))}])]]]]]]})
    [:instance_visual_scene {:url (str "#id_" name "_scene")}]))
 
@@ -206,10 +207,7 @@
   (write-dae (rgpoly-cube (->vec3 0 0 0) nil) "cube" "C:/dev/unity/cube.dae"))
 
 (defn -main
-  "I don't do a whole lot ... yet."
+  "Takes all the CKO files on the command line and converts them to DAEs."
   [& args]
   (doseq [filename args]
     (convert-cko-to-dae filename)))
-
-(convert-cko-to-dae "C:/dev/unity/8.cko")
-;(write-test-cube)
